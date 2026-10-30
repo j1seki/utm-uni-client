@@ -27,11 +27,17 @@
     <main class="layout">
       <aside class="sidebar" aria-label="Servers">
         <div class="sidebar-head">
-          <h2>Servers</h2>
-          <button id="addProfileBtn" class="btn primary small" type="button" title="Add a UTM server">Add</button>
+          <h2>Discovered</h2>
+          <span id="discoveryBadge" class="badge">scanning</span>
+        </div>
+        <ul id="discoveredList" class="profile-list discovered-list"></ul>
+        <p id="discoveredEmpty" class="muted small pad">Scanning for UTM servers…</p>
+        <div class="sidebar-head saved-head">
+          <h2>Saved</h2>
+          <button id="addProfileBtn" class="btn primary small" type="button" title="Add a UTM server manually">Add</button>
         </div>
         <ul id="profileList" class="profile-list"></ul>
-        <p id="profileEmpty" class="muted small pad" hidden>No servers configured.</p>
+        <p id="profileEmpty" class="muted small pad" hidden>No saved servers.</p>
         <div class="sidebar-foot">
           <p class="muted tiny">
             UTM Remote access must be enabled on the Mac. Traffic to UTM is mutual-TLS; the browser only talks to this server.
@@ -130,6 +136,24 @@
         <div class="dialog-actions">
           <button id="profileCancel" class="btn ghost" type="button">Cancel</button>
           <button class="btn primary" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="passwordDialog" class="modal">
+      <form id="passwordForm" method="dialog" novalidate>
+        <h2>UTM Remote password</h2>
+        <p id="passwordServer" class="muted small"></p>
+        <input id="passwordProfileId" type="hidden" />
+        <label class="field">
+          <span>Password</span>
+          <input id="passwordInput" type="password" autocomplete="current-password" required />
+          <small class="muted">Stored server-side in the profile file and never sent back to the browser.</small>
+        </label>
+        <p id="passwordError" class="form-error" hidden></p>
+        <div class="dialog-actions">
+          <button id="passwordCancel" class="btn ghost" type="button">Cancel</button>
+          <button class="btn primary" type="submit">Connect</button>
         </div>
       </form>
     </dialog>

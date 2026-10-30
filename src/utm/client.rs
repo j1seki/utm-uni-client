@@ -1,8 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rustls::pki_types::ServerName;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsConnector;
 
@@ -59,17 +57,19 @@ impl UtmClient {
         identity: Arc<ClientIdentity>,
         options: UtmConnectOptions,
     ) -> Result<(Self, mpsc::UnboundedReceiver<ServerEvent>)> {
-        let address = format!("{}:{}", options.host, options.port);
-        let tcp = tokio::time::timeout(Duration::from_secs(15), TcpStream::connect(&address))
-            .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(Error::Io)?;
+        let tcp = tokio::time::timeout(
+            Duration::from_secs(15),
+            crate::net::connect(&options.host, options.port),
+        )
+        .await
+        .map_err(|_| Error::Timeout)?
+        .map_err(Error::Io)?;
         tcp.set_nodelay(true).ok();
 
         let tls_config = crate::cert::utm_client_config(&identity)?;
         let connector = TlsConnector::from(Arc::new(tls_config));
-        let server_name = ServerName::try_from(options.host.clone())
-            .map_err(|_| Error::BadRequest(format!("invalid host name {:?}", options.host)))?;
+        let server_name = crate::net::tls_server_name(&options.host)
+            .ok_or_else(|| Error::BadRequest(format!("invalid host name {:?}", options.host)))?;
         let tls =
             tokio::time::timeout(Duration::from_secs(15), connector.connect(server_name, tcp))
                 .await

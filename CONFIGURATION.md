@@ -1,5 +1,10 @@
 # Configuration
 
+The normal setup needs no configuration at all: `utm-web` discovers UTM servers
+over Bonjour/mDNS and the UI guides you through trusting one. This document is
+for changing defaults, running behind a proxy, or adding a server manually when
+discovery is unavailable.
+
 `utm-web` can be configured with a JSON file, environment variables and command
 line flags. Precedence is:
 
@@ -64,9 +69,40 @@ passwords in plain text, so treat it as a secret.
 `RUST_LOG` controls logging, for example `RUST_LOG=utm_web=debug`. The default
 is `utm_web=info,warn`.
 
+## Discovery
+
+No configuration is needed for the default flow. On startup `utm-web` browses
+Bonjour/mDNS for the service type `_utm_server._tcp.local.` and pushes results
+to the browser over a WebSocket. The UI lists each server under **Discovered**;
+clicking one creates a profile with the advertised host and port and starts the
+normal trust/password flow.
+
+- Discovery uses multicast DNS (UDP `5353`). It works on typical home and office
+  LANs where the Mac and the `utm-web` host are on the same network.
+- If several addresses are advertised, IPv4 is preferred, then global IPv6, then
+  link-local IPv6. IPv6 scope identifiers are kept for the socket and stripped
+  for TLS.
+- Entries disappear from **Discovered** when the Mac stops advertising and stay
+  under **Saved** once used.
+- If multicast DNS is blocked (corporate Wi-Fi, some containers, VLANs), the
+  list stays empty and the UI says discovery is unavailable. Click **Add** and
+  enter the host and port manually; no other setting changes.
+
+Discovery endpoints:
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/discovery` | Snapshot: `{ available, error, servers[] }`. |
+| `GET /api/discovery/events` | WebSocket that pushes the same snapshot whenever it changes. |
+
+There is no setting to disable discovery; the mDNS browser is idle-cheap and
+only observes the local network. Manual profiles keep working independently of
+it.
+
 ## Profiles
 
-Profiles are created and edited from the web UI. Each profile contains:
+Profiles are created by clicking a discovered server, or manually with **Add**.
+They are stored server-side in the config file. Each profile contains:
 
 | Field | Description |
 | --- | --- |

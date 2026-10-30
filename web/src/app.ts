@@ -3,9 +3,12 @@
 import {
   api,
   ApiError,
+  discoveryUrl,
   displayUrl,
   eventsUrl,
   type ConnectResponse,
+  type DiscoveredServer,
+  type DiscoverySnapshot,
   type ProfileInput,
   type ProfileView,
   type Status,
@@ -25,6 +28,13 @@ interface AgentMessage {
   reason?: string;
   message?: string;
   id?: string;
+}
+
+interface DiscoveryMessage {
+  type: string;
+  available?: boolean;
+  error?: string | null;
+  servers?: DiscoveredServer[];
 }
 
 interface Connection {
@@ -47,6 +57,13 @@ const state = {
   selectedId: null as string | null,
   connections: new Map<string, Connection>(),
   pendingTrust: new Map<string, string>(),
+  discovered: [] as DiscoveredServer[],
+  discoveryAvailable: false,
+  discoveryError: null as string | null,
+  discoveryLive: false,
+  discoverySocket: null as WebSocket | null,
+  discoveryAttempts: 0,
+  discoveryTimer: 0,
   displayClient: null as DisplayClient | null,
   displayProfileId: null as string | null,
   displayVmId: null as string | null,
@@ -98,6 +115,10 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+function endpoint(host: string, port: number): string {
+  return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+}
+
 function handleProfileError(error: unknown, profileId: string): void {
   if (error instanceof ApiError && error.code === "untrusted" && error.fingerprint) {
     state.pendingTrust.set(profileId, error.fingerprint);
@@ -131,6 +152,174 @@ async function loadProfiles(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Bonjour/mDNS discovery
+// ---------------------------------------------------------------------------
+
+function applyDiscovery(snapshot: DiscoverySnapshot): void {
+  state.discoveryAvailable = snapshot.available;
+  state.discoveryError = snapshot.error;
+  state.discovered = snapshot.servers ?? [];
+  state.discoveryLive = true;
+  render();
+}
+
+async function loadDiscovery(): Promise<void> {
+  try {
+    applyDiscovery(await api.discovery());
+  } catch (error) {
+    state.discoveryAvailable = false;
+    state.discoveryError = errorMessage(error);
+    render();
+  }
+}
+
+function connectDiscovery(): void {
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(discoveryUrl());
+  } catch {
+    scheduleDiscoveryReconnect();
+    return;
+  }
+  state.discoverySocket = socket;
+
+  socket.addEventListener("open", () => {
+    state.discoveryAttempts = 0;
+    state.discoveryLive = true;
+    render();
+  });
+
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") return;
+    let message: DiscoveryMessage;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (message.type === "servers") {
+      applyDiscovery({
+        available: message.available ?? true,
+        error: message.error ?? null,
+        servers: message.servers ?? [],
+      });
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    if (state.discoverySocket !== socket) return;
+    state.discoverySocket = null;
+    state.discoveryLive = false;
+    render();
+    scheduleDiscoveryReconnect();
+  });
+
+  socket.addEventListener("error", () => {
+    // close follows
+  });
+}
+
+function scheduleDiscoveryReconnect(): void {
+  state.discoveryAttempts += 1;
+  const delay = Math.min(1000 * state.discoveryAttempts, 10000);
+  window.clearTimeout(state.discoveryTimer);
+  state.discoveryTimer = window.setTimeout(connectDiscovery, delay);
+}
+
+function savedServerFor(server: DiscoveredServer): ProfileView | undefined {
+  return state.profiles.find(
+    (profile) =>
+      profile.port === server.port &&
+      (profile.host === server.host || server.addresses.includes(profile.host)),
+  );
+}
+
+function renderDiscovered(): void {
+  const list = $("discoveredList");
+  list.replaceChildren();
+  const visible = state.discovered.filter((server) => !savedServerFor(server));
+
+  for (const server of visible) {
+    const item = el(
+      "li",
+      {
+        class: "profile-item discovered-item",
+        "data-id": server.id,
+        tabindex: "0",
+        role: "button",
+        title: `Connect to ${server.name}`,
+      },
+      el("span", {
+        class: "status-dot",
+        title: "Discovered on the local network",
+      }),
+      el(
+        "span",
+        { class: "profile-item-text" },
+        el("span", { class: "profile-item-name", text: server.name || server.host }),
+        el("span", { class: "profile-item-host", text: endpoint(server.host, server.port) }),
+      ),
+      el("span", { class: "discovered-action", text: "Connect" }),
+    );
+    list.append(item);
+  }
+
+  const empty = $("discoveredEmpty");
+  empty.hidden = visible.length > 0;
+  if (visible.length === 0) {
+    if (!state.discoveryAvailable) {
+      empty.textContent = state.discoveryError
+        ? `Automatic discovery is unavailable: ${state.discoveryError}`
+        : "Automatic discovery is unavailable. Use Add to enter a server manually.";
+    } else if (!state.discoveryLive) {
+      empty.textContent = "Reconnecting to discovery…";
+    } else if (state.discovered.length > 0) {
+      empty.textContent = "All discovered servers are already saved.";
+    } else {
+      empty.textContent =
+        "No UTM servers found yet. Enable Remote access in UTM on the Mac and keep both devices on the same network.";
+    }
+  }
+
+  const badge = $("discoveryBadge");
+  if (!state.discoveryAvailable) {
+    badge.textContent = "off";
+    badge.className = "badge badge-warn";
+  } else if (!state.discoveryLive) {
+    badge.textContent = "syncing";
+    badge.className = "badge";
+  } else if (visible.length > 0) {
+    badge.textContent = `${visible.length} found`;
+    badge.className = "badge badge-started";
+  } else {
+    badge.textContent = "scanning";
+    badge.className = "badge";
+  }
+}
+
+async function connectDiscovered(server: DiscoveredServer): Promise<void> {
+  let profile = savedServerFor(server);
+  if (!profile) {
+    try {
+      profile = await api.createProfile({
+        name: server.name || server.host,
+        host: server.host,
+        port: server.port,
+      });
+      replaceProfile(profile);
+    } catch (error) {
+      toast(`Cannot add ${server.name}: ${errorMessage(error)}`, "error");
+      return;
+    }
+  }
+  state.selectedId = profile.id;
+  render();
+  const connection = state.connections.get(profile.id);
+  if (connection?.state === "open") return;
+  await connectProfile(profile.id);
+}
+
 function replaceProfile(profile: ProfileView): void {
   const index = state.profiles.findIndex((item) => item.id === profile.id);
   if (index >= 0) state.profiles[index] = profile;
@@ -161,7 +350,7 @@ function renderProfileList(): void {
         "span",
         { class: "profile-item-text" },
         el("span", { class: "profile-item-name", text: profile.name }),
-        el("span", { class: "profile-item-host", text: `${profile.host}:${profile.port}` }),
+        el("span", { class: "profile-item-host", text: endpoint(profile.host, profile.port) }),
       ),
     );
     list.append(item);
@@ -191,9 +380,19 @@ function renderProfile(): void {
     empty.hidden = state.profiles.length > 0 ? false : true;
     if (state.profiles.length === 0) {
       empty.hidden = false;
-      $("emptyTitle").textContent = "No servers yet";
-      $("emptyText").textContent =
-        "Add your Mac running UTM Remote to get started. UTM must have Remote access enabled in Settings.";
+      if (state.discovered.length > 0) {
+        $("emptyTitle").textContent = "Choose a discovered server";
+        $("emptyText").textContent =
+          "Select your Mac in the sidebar. You will be asked to trust its certificate on first connection.";
+        $("emptyAddBtn").hidden = true;
+      } else {
+        $("emptyTitle").textContent = "No servers yet";
+        $("emptyText").textContent = state.discoveryAvailable
+          ? "Looking for UTM servers on your network. You can also add one manually."
+          : "Add your Mac running UTM Remote to get started. UTM must have Remote access enabled in Settings.";
+        $("emptyAddBtn").hidden = false;
+        $("emptyAddBtn").textContent = "Add a server manually";
+      }
     } else {
       empty.hidden = false;
       $("emptyTitle").textContent = "Select a server";
@@ -204,7 +403,7 @@ function renderProfile(): void {
   empty.hidden = true;
   pane.hidden = false;
   $("profileName").textContent = profile.name;
-  $("profileEndpoint").textContent = `${profile.host}:${profile.port}`;
+  $("profileEndpoint").textContent = endpoint(profile.host, profile.port);
   $("profileMeta").textContent = profile.trusted
     ? "Certificate trusted"
     : profile.fingerprint
@@ -364,6 +563,7 @@ function renderVms(connection: Connection | undefined): void {
 
 function render(): void {
   renderStatus();
+  renderDiscovered();
   renderProfileList();
   renderProfile();
 }
@@ -411,6 +611,19 @@ async function connectProfile(profileId: string): Promise<boolean> {
     return true;
   } catch (error) {
     state.connections.delete(profileId);
+    if (
+      error instanceof ApiError &&
+      (error.code === "password_required" || error.code === "invalid_password")
+    ) {
+      render();
+      openPasswordDialog(
+        profileId,
+        error.code === "invalid_password"
+          ? "That password was rejected. Try again."
+          : "This UTM server requires a password.",
+      );
+      return false;
+    }
     handleProfileError(error, profileId);
     return false;
   }
@@ -778,6 +991,44 @@ async function deleteProfile(profile: ProfileView): Promise<void> {
   }
 }
 
+function openPasswordDialog(profileId: string, message = ""): void {
+  const profile = state.profiles.find((item) => item.id === profileId);
+  $<HTMLInputElement>("passwordProfileId").value = profileId;
+  $("passwordServer").textContent = profile
+    ? `${profile.name} · ${endpoint(profile.host, profile.port)}`
+    : "";
+  $<HTMLInputElement>("passwordInput").value = "";
+  const error = $("passwordError");
+  error.hidden = message === "";
+  error.textContent = message;
+  const dialog = $<HTMLDialogElement>("passwordDialog");
+  if (!dialog.open) dialog.showModal();
+  $<HTMLInputElement>("passwordInput").focus();
+}
+
+async function savePassword(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  const profileId = $<HTMLInputElement>("passwordProfileId").value;
+  const password = $<HTMLInputElement>("passwordInput").value;
+  const error = $("passwordError");
+  if (!profileId) return;
+  if (!password) {
+    error.hidden = false;
+    error.textContent = "Enter the UTM Remote password.";
+    return;
+  }
+  try {
+    const profile = await api.updateProfile(profileId, { password });
+    replaceProfile(profile);
+    $<HTMLDialogElement>("passwordDialog").close();
+    render();
+    await connectProfile(profileId);
+  } catch (caught) {
+    error.hidden = false;
+    error.textContent = errorMessage(caught);
+  }
+}
+
 async function trustProfile(profileId: string): Promise<void> {
   const fingerprint = state.pendingTrust.get(profileId) ??
     state.profiles.find((profile) => profile.id === profileId)?.fingerprint;
@@ -801,7 +1052,24 @@ async function trustProfile(profileId: string): Promise<void> {
 function wireEvents(): void {
   $("addProfileBtn").addEventListener("click", () => openProfileDialog(null));
   $("emptyAddBtn").addEventListener("click", () => openProfileDialog(null));
-  $("refreshProfilesBtn").addEventListener("click", () => void loadProfiles());
+  $("refreshProfilesBtn").addEventListener("click", () => {
+    void loadProfiles();
+    void loadDiscovery();
+  });
+
+  const discovered = $("discoveredList");
+  const activateDiscovered = (target: EventTarget | null): void => {
+    const item = (target as HTMLElement | null)?.closest<HTMLElement>(".discovered-item");
+    if (!item) return;
+    const server = state.discovered.find((entry) => entry.id === item.dataset.id);
+    if (server) void connectDiscovered(server);
+  };
+  discovered.addEventListener("click", (event) => activateDiscovered(event.target));
+  discovered.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    activateDiscovered(event.target);
+  });
 
   const list = $("profileList");
   list.addEventListener("click", (event) => {
@@ -868,6 +1136,12 @@ function wireEvents(): void {
   $("profileCancel").addEventListener("click", () => {
     $<HTMLDialogElement>("profileDialog").close();
   });
+  $<HTMLFormElement>("passwordForm").addEventListener("submit", (event) => {
+    void savePassword(event);
+  });
+  $("passwordCancel").addEventListener("click", () => {
+    $<HTMLDialogElement>("passwordDialog").close();
+  });
   $<HTMLInputElement>("profileFingerprintInput").addEventListener("input", () => {
     const fingerprint = $<HTMLInputElement>("profileFingerprintInput").value.trim();
     const trusted = $<HTMLInputElement>("profileTrustedInput");
@@ -901,6 +1175,8 @@ function wireEvents(): void {
 
   window.addEventListener("beforeunload", () => {
     state.displayClient?.close();
+    state.discoverySocket?.close();
+    window.clearTimeout(state.discoveryTimer);
   });
 }
 
@@ -912,7 +1188,8 @@ async function init(): Promise<void> {
   } catch (error) {
     toast(`Cannot reach the utm-web backend: ${errorMessage(error)}`, "error");
   }
-  await loadProfiles();
+  await Promise.all([loadProfiles(), loadDiscovery()]);
+  connectDiscovery();
   render();
 }
 

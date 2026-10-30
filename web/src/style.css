@@ -286,6 +286,40 @@ button {
   border-top: 1px solid var(--border);
 }
 
+.discovered-list {
+  flex: 0 1 auto;
+}
+
+#profileList {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.discovered-item .status-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.discovered-action {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.saved-head {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
 .content {
   min-width: 0;
   overflow-y: auto;

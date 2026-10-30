@@ -38,6 +38,8 @@ pkcs8 = { version = "0.10", features = ["encryption"] }
 base64 = "0.22"
 jpeg-decoder = { version = "0.3", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+if-addrs = "0.15"
+mdns-sd = { version = "0.21.6", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

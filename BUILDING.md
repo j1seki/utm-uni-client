@@ -162,6 +162,21 @@ at login, create a shortcut in `shell:startup`, or register it with Task
 Scheduler / [NSSM](https://nssm.cc/). The config directory defaults to
 `%APPDATA%\utm-web`.
 
+## Network discovery
+
+`utm-web` uses multicast DNS (UDP `5353`) to find UTM servers, so the host must
+be on the same LAN as the Mac. No ports need to be opened for discovery itself;
+only the UTM Remote port advertised by the Mac is contacted.
+
+- Linux: if the machine runs a firewall, allow inbound and outbound UDP `5353`
+  on the LAN interface. Avahi does not need to be installed; `utm-web` has its
+  own mDNS stack.
+- Windows: the first launch may show a Windows Defender Firewall prompt. Allow
+  access on private networks. If multicast is blocked, add the server manually.
+- macOS: allow incoming connections when prompted.
+- Containers/VMs: multicast often does not cross the virtual network. Use
+  **Add** with the host and port instead, or run `utm-web` on the LAN host.
+
 ## Verifying a release
 
 ```sh

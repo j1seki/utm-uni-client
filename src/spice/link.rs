@@ -129,19 +129,20 @@ pub struct Channel {
 /// Connect a SPICE channel over TLS, perform the link handshake and ticket
 /// authentication.
 pub async fn connect_channel(options: LinkOptions) -> Result<Channel> {
-    let address = format!("{}:{}", options.host, options.port);
-    let tcp = tokio::time::timeout(options.timeout, TcpStream::connect(&address))
-        .await
-        .map_err(|_| Error::Timeout)?
-        .map_err(Error::Io)?;
+    let tcp = tokio::time::timeout(
+        options.timeout,
+        crate::net::connect(&options.host, options.port),
+    )
+    .await
+    .map_err(|_| Error::Timeout)?
+    .map_err(Error::Io)?;
     tcp.set_nodelay(true).ok();
 
     let config = crate::cert::spice_client_config(options.expected_spki.clone())?;
     let connector = TlsConnector::from(Arc::new(config));
-    let host = options.host.clone();
-    let server_name = ServerName::try_from(host.clone())
-        .or_else(|_| ServerName::try_from("utm-spice.local"))
-        .map_err(|_| Error::Spice("invalid SPICE server name".into()))?;
+    let server_name = crate::net::tls_server_name(&options.host)
+        .or_else(|| ServerName::try_from("utm-spice.local").ok())
+        .ok_or_else(|| Error::Spice("invalid SPICE server name".into()))?;
     let mut tls = tokio::time::timeout(options.timeout, connector.connect(server_name, tcp))
         .await
         .map_err(|_| Error::Timeout)?

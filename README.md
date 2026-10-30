@@ -14,7 +14,11 @@ server. The frontend is plain TypeScript, HTML and CSS.
 
 ## Features
 
-- **Profiles** for multiple UTM servers, stored server-side.
+- **Zero-config discovery**: UTM servers on the local network are found over
+  Bonjour/mDNS (`_utm_server._tcp`) and listed in the sidebar automatically.
+  Click one, confirm its fingerprint, and you are connected.
+- **Profiles** for multiple UTM servers, stored server-side. Manual entries
+  remain available when mDNS is blocked.
 - **VM lifecycle**: start, stop, force stop, restart, pause and resume.
 - **Live display** over SPICE with dirty-rectangle updates, resize handling and
   JPEG/bitmap decoding.
@@ -44,6 +48,8 @@ On the machine running `utm-web`:
 
 - Linux, macOS or Windows.
 - No special privileges. The default listen address is `127.0.0.1:8080`.
+- The machine should be on the same LAN as the Mac, with multicast DNS
+  (UDP `5353`) allowed. If multicast is blocked, add the server manually.
 
 On the browser:
 
@@ -60,17 +66,22 @@ chmod +x utm-web
 ./utm-web
 ```
 
-Open <http://localhost:8080>, click **Add**, and enter:
+Open <http://localhost:8080>. That is all: `utm-web` browses the local network
+for UTM servers and lists them under **Discovered** in the sidebar.
 
-| Field | Value |
-| --- | --- |
-| Host | Hostname or IP of the Mac running UTM |
-| Port | `21589` (UTM Remote default) |
-| Password | The UTM Remote password, if one is set |
+1. Make sure UTM on the Mac has **Remote access** enabled (UTM → Settings →
+   Remote). The server advertises itself as `_utm_server._tcp`; no port or
+   hostname needs to be typed.
+2. Click the Mac in **Discovered**.
+3. On the first connection the server certificate is untrusted. Compare the
+   displayed fingerprint with the one shown in UTM on the Mac, then click
+   **Trust server**. If UTM Remote has a password, a password dialog opens.
+4. The VM list appears once the handshake succeeds. The server moves to
+   **Saved** so it is available on the next launch.
 
-Click **Connect**. On the first connection the server certificate is untrusted;
-compare the displayed fingerprint with the one shown in UTM on the Mac, then
-click **Trust server**. The VM list appears once the handshake succeeds.
+There is no config file to edit for the normal flow. If the network blocks
+multicast DNS (some corporate or container networks), click **Add** and enter
+the host and port manually; everything else is identical.
 
 The first run generates a client certificate at
 `~/.config/utm-web/client.pem` (or `%APPDATA%\utm-web\client.pem` on Windows).
@@ -98,11 +109,14 @@ file. See [CONFIGURATION.md](CONFIGURATION.md).
 ```text
 browser ──HTTP/WebSocket──▶ utm-web ──mutual TLS──▶ UTM Remote (SwiftConnect)
                                │
-                               └──TLS + SPICE──▶ QEMU SPICE server
+                               ├──TLS + SPICE──▶ QEMU SPICE server
+                               └──mDNS browse──▶ _utm_server._tcp.local.
 ```
 
 - The browser never sees the UTM client certificate, the UTM password or the
   SPICE ticket. All of that stays in the Rust process.
+- mDNS discovery runs in the `utm-web` process. Results are pushed to the
+  browser over `/api/discovery/events`, so the UI does not poll.
 - UTM traffic uses the SwiftConnect framing and Apple `Codable` binary payloads.
 - Display traffic uses the real SPICE protocol: link handshake, ticket
   authentication, main/display/inputs channels, mini headers, ACKs and draw

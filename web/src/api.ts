@@ -63,6 +63,20 @@ export interface ProfileInput {
   trusted?: boolean;
 }
 
+export interface DiscoveredServer {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  addresses: string[];
+}
+
+export interface DiscoverySnapshot {
+  available: boolean;
+  error: string | null;
+  servers: DiscoveredServer[];
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -108,6 +122,7 @@ function json(body: unknown): RequestInit {
 
 export const api = {
   status: () => request<Status>("/api/status"),
+  discovery: () => request<DiscoverySnapshot>("/api/discovery"),
   profiles: () => request<ProfileView[]>("/api/profiles"),
   createProfile: (input: ProfileInput) =>
     request<ProfileView>("/api/profiles", json(input)),
@@ -147,6 +162,11 @@ export const api = {
 export function eventsUrl(profileId: string): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${location.host}/api/profiles/${encodeURIComponent(profileId)}/events`;
+}
+
+export function discoveryUrl(): string {
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${scheme}//${location.host}/api/discovery/events`;
 }
 
 export function displayUrl(profileId: string, vmId: string): string {

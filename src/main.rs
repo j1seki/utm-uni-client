@@ -10,6 +10,7 @@ use tracing_subscriber::EnvFilter;
 
 use utm_web::cert;
 use utm_web::config;
+use utm_web::discovery::Discovery;
 use utm_web::server::{router, AppState};
 
 #[tokio::main]
@@ -57,7 +58,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = app_config.config_path.clone();
     let listen = app_config.listen;
     let profiles = Arc::new(profiles);
-    let state = AppState::new(app_config, identity, profiles);
+    let discovery = Discovery::start();
+    let state = AppState::new(app_config, identity, profiles, discovery.clone());
 
     if !listen.ip().is_loopback() {
         warn!(
@@ -97,6 +99,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     reaper.abort();
     state.disconnect_all().await;
+    discovery.shutdown();
 
     result?;
     info!("shut down");

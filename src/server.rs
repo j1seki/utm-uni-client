@@ -19,6 +19,7 @@ use tracing::{debug, info, warn};
 use crate::agent::{perform_action, Agent, AgentEvent};
 use crate::cert::{format_fingerprint, parse_fingerprint, ClientIdentity};
 use crate::config::AppConfig;
+use crate::discovery::{Discovery, DiscoverySnapshot};
 use crate::display_session::{create_display, DisplayEvent, DisplaySession, Frame};
 use crate::error::Error;
 use crate::profiles::{new_id, Profile, ProfileStore, ProfileView};
@@ -37,6 +38,7 @@ pub struct AppState {
     pub config: AppConfig,
     pub identity: Arc<ClientIdentity>,
     pub profiles: Arc<ProfileStore>,
+    pub discovery: Discovery,
     agents: Arc<Mutex<HashMap<String, Arc<Agent>>>>,
     displays: Arc<Mutex<HashMap<String, Arc<DisplaySession>>>>,
     connect_lock: Arc<Mutex<()>>,
@@ -49,11 +51,13 @@ impl AppState {
         config: AppConfig,
         identity: Arc<ClientIdentity>,
         profiles: Arc<ProfileStore>,
+        discovery: Discovery,
     ) -> Arc<Self> {
         Arc::new(Self {
             config,
             identity,
             profiles,
+            discovery,
             agents: Arc::new(Mutex::new(HashMap::new())),
             displays: Arc::new(Mutex::new(HashMap::new())),
             connect_lock: Arc::new(Mutex::new(())),
@@ -268,6 +272,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/api/status", get(status))
+        .route("/api/discovery", get(discovered_servers))
+        .route("/api/discovery/events", get(discovery_events))
         .route("/api/profiles", get(list_profiles).post(create_profile))
         .route(
             "/api/profiles/{id}",
@@ -446,6 +452,74 @@ async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
 
 async fn list_profiles(State(state): State<Arc<AppState>>) -> Json<Vec<ProfileView>> {
     Json(state.profiles.list())
+}
+
+async fn discovered_servers(State(state): State<Arc<AppState>>) -> Json<DiscoverySnapshot> {
+    Json(state.discovery.snapshot())
+}
+
+async fn discovery_events(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
+    let discovery = state.discovery.clone();
+    ws.on_upgrade(move |socket| run_discovery_ws(socket, discovery))
+}
+
+async fn run_discovery_ws(mut socket: WebSocket, discovery: Discovery) {
+    let mut changes = discovery.subscribe();
+    let mut keepalive = tokio::time::interval(Duration::from_secs(30));
+    keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    keepalive.tick().await;
+    if send_json(&mut socket, &discovery_message(&discovery.snapshot()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    loop {
+        tokio::select! {
+            _ = keepalive.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                if send_json(&mut socket, &discovery_message(&discovery.snapshot())).await.is_err() {
+                    break;
+                }
+            }
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(data))) => {
+                        let _ = socket.send(Message::Pong(data)).await;
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        let is_ping = serde_json::from_str::<serde_json::Value>(&text)
+                            .map(|value| {
+                                value.get("type").and_then(|kind| kind.as_str()) == Some("ping")
+                            })
+                            .unwrap_or(false);
+                        if is_ping {
+                            let _ = send_json(&mut socket, &json!({ "type": "pong" })).await;
+                        }
+                    }
+                    Some(Err(_)) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        }
+    }
+}
+
+fn discovery_message(snapshot: &DiscoverySnapshot) -> serde_json::Value {
+    json!({
+        "type": "servers",
+        "available": snapshot.available,
+        "error": snapshot.error,
+        "servers": snapshot.servers,
+    })
 }
 
 #[derive(Deserialize)]
