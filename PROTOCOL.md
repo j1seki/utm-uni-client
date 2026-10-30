@@ -412,6 +412,8 @@ messages are JSON control messages; binary messages start with a one-byte kind:
 
 The first text message is `{"type":"ready","vm":...,"name":...,"width":...,"height":...}`.
 The server also sends a full-surface frame and the current mouse mode on connect.
+Frames with `seq = 0` are full-surface snapshots; other frames carry the
+monotonically increasing sequence number used to detect dropped rectangles.
 
 Client text messages:
 

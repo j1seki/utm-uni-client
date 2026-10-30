@@ -61,8 +61,10 @@ replies. Every binary message starts with a one-byte kind:
 
 All integers are little-endian. The frame payload after the 29-byte header is
 tightly packed RGBA, row-major, top down, `w * h * 4` bytes. The client applies
-rectangles in order; `seq` lets it detect gaps after a reconnect, in which case
-it sends `refresh` to request a full redraw.
+rectangles in order. A non-zero `seq` that is not the previous value plus one
+means a dirty rectangle was missed, so the client sends `refresh`. Sequence `0`
+marks a full-surface snapshot (initial connect, lag recovery or refresh) and
+resets the sequence baseline.
 
 Client → server messages are JSON text frames:
 

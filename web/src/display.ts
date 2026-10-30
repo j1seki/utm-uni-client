@@ -49,6 +49,7 @@ export class DisplayClient {
   private reconnectTimer = 0;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 6;
+  private lastSeq: number | null = null;
   private readonly pressedModifiers = new Set<string>();
   private readonly pressedKeys = new Set<string>();
   private readonly cleanups: Array<() => void> = [];
@@ -84,7 +85,7 @@ export class DisplayClient {
     this.ws = socket;
 
     socket.addEventListener("open", () => {
-      this.reconnectAttempts = 0;
+      this.lastSeq = null;
       this.hooks.onStatus("connecting", "waiting for the first frame");
     });
 
@@ -162,6 +163,11 @@ export class DisplayClient {
       if (ready.width > 0 && ready.height > 0) {
         this.resize(ready.width, ready.height);
       }
+      // Only a completed handshake proves the session is healthy.  Resetting
+      // the retry budget on `open` would loop forever against a server that
+      // accepts the socket and closes it again.
+      this.reconnectAttempts = 0;
+      this.lastSeq = null;
       this.hooks.onStatus("live");
     } else if (message.type === "pong") {
       // keep-alive acknowledgement
@@ -181,9 +187,22 @@ export class DisplayClient {
         const h = view.getUint32(13, true);
         const surfaceW = view.getUint32(17, true);
         const surfaceH = view.getUint32(21, true);
+        const seq = view.getUint32(25, true);
         if (w === 0 || h === 0) return;
         if (surfaceW !== this.surfaceW || surfaceH !== this.surfaceH) {
           this.resize(surfaceW, surfaceH);
+        }
+        // Sequence 0 is a full-surface snapshot (connect, lag recovery or an
+        // explicit refresh).  Any other jump means we missed a dirty rect, so
+        // ask for a fresh snapshot.  A snapshot resets the baseline because
+        // the server's next partial frame continues from its own counter.
+        if (seq === 0) {
+          this.lastSeq = null;
+        } else {
+          if (this.lastSeq !== null && seq !== ((this.lastSeq + 1) >>> 0)) {
+            this.refresh();
+          }
+          this.lastSeq = seq;
         }
         const length = w * h * 4;
         if (data.byteLength < FRAME_HEADER + length) return;
