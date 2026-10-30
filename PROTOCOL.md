@@ -117,10 +117,18 @@ value bytes...
 
 Other rules:
 
-- Integers are 8-byte little-endian signed values.
+- Integers are encoded at their Swift type width, little-endian. `Int` is 8
+  bytes; narrower types such as `UInt16` use 2 bytes. The decoder sign-extends
+  values shorter than 8 bytes.
 - Strings are ULEB128 byte length followed by UTF-8.
-- Swift enums with raw values encode as a keyed container with exactly one key
-  (the case name). The decoder returns that key as a string.
+- Swift enums with a raw value (`enum X: Int, Codable` or `enum X: String,
+  Codable`) encode as a single `Int` or `String`, **not** as a keyed
+  container. `UTMVirtualMachineState` and `UTMBackend` are examples.
+- Swift enums without a raw value encode as a keyed container with exactly one
+  key (the case name). The decoder returns that key as a string.
+- Swift `OptionSet` structs encode as a keyed container with a single
+  `rawValue` field: `{ "rawValue": <int> }`. `UTMCapabilities` and
+  `UTMVirtualMachineStartOptions` are examples.
 - Dictionaries and structs use sorted keys, matching pyutmremote's encoder.
 - `Type::Skip` exists for opaque values such as QEMU configurations.
 
@@ -136,9 +144,11 @@ handshake {version:1,password:"secret"}
 
 Client handshake body: `{version: 1, password?: string}`.
 
-Reply: `{version, isAuthenticated, capabilities, model}`. If
-`isAuthenticated` is false, the connection is rejected (`password_required` if
-no password was sent, `invalid_password` otherwise).
+Reply: `{version, isAuthenticated, capabilities, model}`, where
+`capabilities` is the `UTMCapabilities` OptionSet encoded as
+`{ "rawValue": <int> }`. If `isAuthenticated` is false, the connection is
+rejected (`password_required` if no password was sent, `invalid_password`
+otherwise).
 
 ### Fingerprints
 
