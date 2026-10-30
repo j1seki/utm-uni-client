@@ -62,6 +62,17 @@ impl VmState {
             _ => VmState::Stopped,
         }
     }
+
+    /// UTM encodes `UTMVirtualMachineState` as a raw `Int`.  Accept the old
+    /// keyed case-name form as well so cached/legacy payloads keep working.
+    pub fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Int(raw) => Some(Self::from_i64(*raw)),
+            Value::Str(name) => Self::from_name(name),
+            Value::Dict(map) => map.keys().next().and_then(|name| Self::from_name(name)),
+            _ => None,
+        }
+    }
 }
 
 impl Serialize for VmState {
@@ -147,8 +158,7 @@ impl VmInfo {
                 .to_lowercase(),
             state: value
                 .get("state")
-                .and_then(Value::as_str)
-                .and_then(VmState::from_name)
+                .and_then(VmState::from_value)
                 .unwrap_or(VmState::Stopped),
             mounted_drives: value
                 .get("mountedDrives")

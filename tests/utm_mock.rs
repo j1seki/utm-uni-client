@@ -103,7 +103,7 @@ fn handshake_reply(authenticated: bool) -> Value {
     Value::dict([
         ("version", Value::Int(1)),
         ("isAuthenticated", value_bool(authenticated)),
-        ("capabilities", Value::Int(0)),
+        ("capabilities", Value::dict([("rawValue", Value::Int(0))])),
         ("model", Value::Str("Mock Mac".into())),
     ])
 }
@@ -116,8 +116,10 @@ fn vm_info() -> Value {
         ("isShortcut", Value::Bool(false)),
         ("isSuspended", Value::Bool(false)),
         ("isTakeoverAllowed", Value::Bool(true)),
-        ("backend", Value::dict([("qemu", Value::empty())])),
-        ("state", Value::dict([("started", Value::empty())])),
+        // Real UTM sends a String raw value for `UTMBackend`.
+        ("backend", Value::Str("QEMU".into())),
+        // ...and an Int raw value for `UTMVirtualMachineState`.
+        ("state", Value::Int(2)),
         ("mountedDrives", Value::Dict(Default::default())),
     ])
 }

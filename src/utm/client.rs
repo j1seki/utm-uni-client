@@ -125,6 +125,7 @@ impl UtmClient {
         }
         let capabilities = reply
             .get("capabilities")
+            .and_then(|value| value.get("rawValue").or(Some(value)))
             .and_then(Value::as_i64)
             .unwrap_or(0);
         let model = reply

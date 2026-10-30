@@ -682,18 +682,19 @@ mod tests {
         static INFO: Type = Type::Struct(&[
             ("id", Type::Str),
             ("name", Type::Str),
-            ("state", Type::Enum),
+            ("state", Type::Int),
             ("isTakeoverAllowed", Type::Bool),
             ("mountedDrives", Type::MapStrStr),
         ]);
         static INFOS: Type = Type::Array(&INFO);
         static REPLY: Type = Type::Struct(&[("informations", INFOS)]);
 
-        // Generated with pyutmremote for a VirtualMachineInformation reply.
+        // Mirrors the real UTM `VirtualMachineInformation` encoding: UUID as a
+        // string, `UTMVirtualMachineState` as a raw Int.
         let info = Value::dict([
             ("id", Value::Str("vm-1".into())),
             ("name", Value::Str("Linux".into())),
-            ("state", Value::dict([("started", Value::empty())])),
+            ("state", Value::Int(2)),
             ("isTakeoverAllowed", Value::Bool(true)),
             (
                 "mountedDrives",
@@ -706,7 +707,7 @@ mod tests {
         let infos = decoded.get("informations").unwrap().as_array().unwrap();
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].get("name").unwrap().as_str(), Some("Linux"));
-        assert_eq!(infos[0].get("state").unwrap().as_str(), Some("started"));
+        assert_eq!(infos[0].get("state").unwrap().as_i64(), Some(2));
         assert_eq!(
             infos[0].get("isTakeoverAllowed").unwrap().as_bool(),
             Some(true)
@@ -719,6 +720,38 @@ mod tests {
                 .unwrap()
                 .as_str(),
             Some("/dev/sda")
+        );
+    }
+
+    #[test]
+    fn decodes_raw_enums_and_option_set() {
+        static INFO: Type = Type::Struct(&[("backend", Type::Str), ("state", Type::Int)]);
+        static HANDSHAKE: Type = Type::Struct(&[
+            ("capabilities", Type::Struct(&[("rawValue", Type::Int)])),
+            ("model", Type::Str),
+        ]);
+
+        let info = Value::dict([
+            ("backend", Value::Str("QEMU".into())),
+            ("state", Value::Int(2)),
+        ]);
+        let decoded = decode(&encode(&info).unwrap(), INFO).unwrap();
+        assert_eq!(decoded.get("backend").unwrap().as_str(), Some("QEMU"));
+        assert_eq!(decoded.get("state").unwrap().as_i64(), Some(2));
+
+        let handshake = Value::dict([
+            ("capabilities", Value::dict([("rawValue", Value::Int(5))])),
+            ("model", Value::Str("MacBookPro18,3".into())),
+        ]);
+        let decoded = decode(&encode(&handshake).unwrap(), HANDSHAKE).unwrap();
+        assert_eq!(
+            decoded
+                .get("capabilities")
+                .unwrap()
+                .get("rawValue")
+                .unwrap()
+                .as_i64(),
+            Some(5)
         );
     }
 

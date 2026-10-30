@@ -20,6 +20,7 @@ use tracing::{debug, warn};
 use crate::codable::{decode, encode, Value};
 use crate::error::{Error, Result};
 use crate::utm::messages::{self, client, schemas};
+use crate::utm::types::VmState;
 
 const FLAG_RESPONSE: u8 = 1;
 const FLAG_ERROR: u8 = 2;
@@ -303,8 +304,9 @@ impl Peer {
                 if let Some(vm) = value.get("id").and_then(Value::as_str) {
                     let state = value
                         .get("state")
-                        .and_then(Value::as_str)
-                        .unwrap_or("stopped")
+                        .and_then(VmState::from_value)
+                        .unwrap_or(VmState::Stopped)
+                        .as_str()
                         .to_owned();
                     let allowed = value
                         .get("isTakeoverAllowed")

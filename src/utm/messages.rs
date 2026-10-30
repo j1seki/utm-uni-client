@@ -64,8 +64,14 @@ pub fn handshake(version: i64, password: Option<&str>) -> Value {
 pub fn client_handshake_reply(version: i64, capabilities: i64) -> Value {
     Value::dict([
         ("version", Value::Int(version)),
-        ("capabilities", Value::Int(capabilities)),
+        ("capabilities", option_set(capabilities)),
     ])
+}
+
+/// `OptionSet` values are Swift structs, so they are encoded as a keyed
+/// container with a single `rawValue` field rather than a bare integer.
+pub fn option_set(raw_value: i64) -> Value {
+    Value::dict([("rawValue", Value::Int(raw_value))])
 }
 
 pub fn list_virtual_machines() -> Value {
@@ -152,7 +158,7 @@ pub fn mount_guest_tools(id: &str) -> Value {
 pub fn start_virtual_machine(id: &str, options: i64) -> Value {
     Value::dict([
         ("id", Value::Str(id.to_owned())),
-        ("options", Value::Int(options)),
+        ("options", option_set(options)),
     ])
 }
 
@@ -198,6 +204,9 @@ pub mod schemas {
         ("spicePassword", Type::Str),
     ]);
 
+    /// Swift `OptionSet` structs encode as `{ "rawValue": UInt }`.
+    pub static OPTION_SET: Type = Type::Struct(&[("rawValue", Type::Int)]);
+
     pub static VM_INFORMATION: Type = Type::Struct(&[
         ("id", Type::Str),
         ("name", Type::Str),
@@ -205,8 +214,10 @@ pub mod schemas {
         ("isShortcut", Type::Bool),
         ("isSuspended", Type::Bool),
         ("isTakeoverAllowed", Type::Bool),
-        ("backend", Type::Enum),
-        ("state", Type::Enum),
+        // `UTMBackend` is a `String` raw-value enum.
+        ("backend", Type::Str),
+        // `UTMVirtualMachineState` is an `Int` raw-value enum.
+        ("state", Type::Int),
         ("mountedDrives", Type::MapStrStr),
     ]);
 
@@ -215,12 +226,12 @@ pub mod schemas {
     pub static SERVER_HANDSHAKE_REPLY: Type = Type::Struct(&[
         ("version", Type::Int),
         ("isAuthenticated", Type::Bool),
-        ("capabilities", Type::Int),
+        ("capabilities", OPTION_SET),
         ("model", Type::Str),
     ]);
 
     pub static CLIENT_HANDSHAKE_REPLY: Type =
-        Type::Struct(&[("version", Type::Int), ("capabilities", Type::Int)]);
+        Type::Struct(&[("version", Type::Int), ("capabilities", OPTION_SET)]);
 
     pub static LIST_VMS_REPLY: Type = Type::Struct(&[("ids", Type::Array(&Type::Str))]);
 
@@ -247,10 +258,129 @@ pub mod schemas {
 
     pub static VM_DID_TRANSITION_REQUEST: Type = Type::Struct(&[
         ("id", Type::Str),
-        ("state", Type::Enum),
+        // `UTMVirtualMachineState` is an `Int` raw-value enum.
+        ("state", Type::Int),
         ("isTakeoverAllowed", Type::Bool),
     ]);
 
     pub static VM_DID_ERROR_REQUEST: Type =
         Type::Struct(&[("id", Type::Str), ("errorMessage", Type::Str)]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codable::{decode, encode};
+    use crate::utm::types::VmInfo;
+
+    #[test]
+    fn client_handshake_reply_encodes_capabilities_as_option_set() {
+        let reply = client_handshake_reply(1, 5);
+        assert_eq!(
+            reply.get("capabilities").and_then(|v| v.get("rawValue")),
+            Some(&Value::Int(5))
+        );
+        assert_eq!(
+            reply.get("capabilities").and_then(Value::as_i64),
+            None,
+            "capabilities must not be a bare integer"
+        );
+    }
+
+    #[test]
+    fn start_virtual_machine_encodes_options_as_option_set() {
+        let request = start_virtual_machine("vm-1", 4);
+        assert_eq!(
+            request.get("options").and_then(|v| v.get("rawValue")),
+            Some(&Value::Int(4))
+        );
+        assert_eq!(
+            request.get("options").and_then(Value::as_i64),
+            None,
+            "options must not be a bare integer"
+        );
+    }
+
+    #[test]
+    fn decodes_real_server_handshake_reply() {
+        let reply = Value::dict([
+            ("version", Value::Int(1)),
+            ("isAuthenticated", Value::Bool(true)),
+            ("capabilities", option_set(13)),
+            ("model", Value::Str("Mac14,2".into())),
+        ]);
+        let decoded = decode(&encode(&reply).unwrap(), schemas::SERVER_HANDSHAKE_REPLY).unwrap();
+        assert_eq!(decoded.get("version").and_then(Value::as_i64), Some(1));
+        assert_eq!(
+            decoded.get("isAuthenticated").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            decoded
+                .get("capabilities")
+                .and_then(|v| v.get("rawValue"))
+                .and_then(Value::as_i64),
+            Some(13)
+        );
+    }
+
+    #[test]
+    fn decodes_real_vm_information() {
+        let info = Value::dict([
+            (
+                "id",
+                Value::Str("A1B2C3D4-0000-0000-0000-000000000000".into()),
+            ),
+            ("name", Value::Str("Windows 11".into())),
+            ("path", Value::Str("/Users/me/VMs/Windows.utm".into())),
+            ("isShortcut", Value::Bool(false)),
+            ("isSuspended", Value::Bool(false)),
+            ("isTakeoverAllowed", Value::Bool(true)),
+            ("backend", Value::Str("QEMU".into())),
+            ("state", Value::Int(2)),
+            (
+                "mountedDrives",
+                Value::dict([("disk.img", Value::Str("/dev/sda".into()))]),
+            ),
+        ]);
+        let reply = Value::dict([("informations", Value::Array(vec![info]))]);
+        let decoded = decode(&encode(&reply).unwrap(), schemas::GET_VM_INFO_REPLY).unwrap();
+        let vm = VmInfo::from_value(
+            decoded
+                .get("informations")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .expect("vm information"),
+        )
+        .expect("parse vm information");
+        assert_eq!(vm.name, "Windows 11");
+        assert_eq!(vm.backend, "qemu");
+        assert_eq!(vm.state, crate::utm::types::VmState::Started);
+        assert_eq!(
+            vm.mounted_drives.get("disk.img").map(String::as_str),
+            Some("/dev/sda")
+        );
+    }
+
+    #[test]
+    fn decodes_real_vm_transition() {
+        let transition = Value::dict([
+            (
+                "id",
+                Value::Str("A1B2C3D4-0000-0000-0000-000000000000".into()),
+            ),
+            ("state", Value::Int(8)),
+            ("isTakeoverAllowed", Value::Bool(false)),
+        ]);
+        let decoded = decode(
+            &encode(&transition).unwrap(),
+            schemas::VM_DID_TRANSITION_REQUEST,
+        )
+        .unwrap();
+        assert_eq!(decoded.get("state").and_then(Value::as_i64), Some(8));
+        assert_eq!(
+            decoded.get("isTakeoverAllowed").and_then(Value::as_bool),
+            Some(false)
+        );
+    }
 }
