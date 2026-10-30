@@ -80,12 +80,12 @@ build_target() {
   local target="$1"
   local out
 
-  if [ "$target" = "$HOST" ]; then
+  if have cargo-zigbuild && have zig; then
+    echo "==> building $target with cargo-zigbuild"
+    cargo zigbuild --release --target "$target"
+  elif [ "$target" = "$HOST" ]; then
     echo "==> building native target $target"
     cargo build --release --target "$target"
-  elif have cargo-zigbuild && have zig; then
-    echo "==> cross-building $target with cargo-zigbuild"
-    cargo zigbuild --release --target "$target"
   else
     echo "warning: skipping $target (cargo-zigbuild and Zig are required)" >&2
     return 1

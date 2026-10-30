@@ -122,6 +122,10 @@ checksums to `dist/`:
 ./scripts/build-release.sh
 ```
 
+When Zig is available it is used for the native target too, which lowers the
+required glibc version (2.28 for the Linux archives here) compared with a
+build against the host's glibc.
+
 Result:
 
 ```text
