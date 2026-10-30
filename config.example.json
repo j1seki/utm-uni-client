@@ -1,0 +1,10 @@
+{
+  "listen": "127.0.0.1:8080",
+  "client_certificate": "~/.config/utm-web/client.pem",
+  "certificate_password": "password",
+  "allow_untrusted": false,
+  "max_sessions": 32,
+  "session_idle_timeout_secs": 3600,
+  "public_url": null,
+  "profiles": []
+}

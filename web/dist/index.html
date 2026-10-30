@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>utm-web · UTM Remote</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">▣</span>
+        <span class="brand-name">utm-web</span>
+        <span id="version" class="version"></span>
+      </div>
+      <span id="untrustedBadge" class="badge badge-warn" hidden>untrusted mode</span>
+      <div class="spacer"></div>
+      <span class="client-id" title="This client's certificate fingerprint">
+        <span class="label">client</span>
+        <code id="clientFingerprint"></code>
+      </span>
+      <button id="refreshProfilesBtn" class="btn ghost small" type="button" title="Reload profiles">Reload</button>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" aria-label="Servers">
+        <div class="sidebar-head">
+          <h2>Servers</h2>
+          <button id="addProfileBtn" class="btn primary small" type="button" title="Add a UTM server">Add</button>
+        </div>
+        <ul id="profileList" class="profile-list"></ul>
+        <p id="profileEmpty" class="muted small pad" hidden>No servers configured.</p>
+        <div class="sidebar-foot">
+          <p class="muted tiny">
+            UTM Remote access must be enabled on the Mac. Traffic to UTM is mutual-TLS; the browser only talks to this server.
+          </p>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div id="emptyState" class="empty-state">
+          <div class="empty-card">
+            <div class="empty-icon" aria-hidden="true">▤</div>
+            <h1 id="emptyTitle">No servers yet</h1>
+            <p id="emptyText" class="muted">
+              Add your Mac running UTM Remote to get started.
+            </p>
+            <button id="emptyAddBtn" class="btn primary" type="button">Add a server</button>
+          </div>
+        </div>
+
+        <div id="profilePane" hidden>
+          <div class="profile-head">
+            <div class="profile-title">
+              <h1 id="profileName"></h1>
+              <p class="subtle"><span id="profileEndpoint"></span> · <span id="profileMeta"></span></p>
+            </div>
+            <div class="profile-actions">
+              <button id="connectBtn" class="btn primary" type="button">Connect</button>
+              <button id="disconnectBtn" class="btn" type="button" hidden>Disconnect</button>
+              <button id="editProfileBtn" class="btn ghost" type="button">Edit</button>
+              <button id="deleteProfileBtn" class="btn ghost danger-text" type="button">Delete</button>
+            </div>
+          </div>
+
+          <div id="trustBanner" class="trust-banner" hidden role="alert">
+            <div class="trust-icon" aria-hidden="true">!</div>
+            <div class="trust-body">
+              <h2>Verify this server</h2>
+              <p id="trustHint"></p>
+              <code id="trustFingerprint" class="fingerprint-value"></code>
+            </div>
+            <button id="trustBtn" class="btn primary" type="button">Trust server</button>
+          </div>
+
+          <details class="fingerprints-box">
+            <summary>Certificates and connection</summary>
+            <div id="fingerprints" class="fingerprints"></div>
+          </details>
+
+          <div class="vm-section">
+            <div class="section-head">
+              <h2>Virtual machines</h2>
+              <div id="vmToolbar" class="section-tools" hidden>
+                <button id="refreshVmsBtn" class="btn ghost small" type="button">Refresh</button>
+              </div>
+            </div>
+            <p id="vmHint" class="muted small"></p>
+            <div id="vmList" class="vm-list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="profileDialog" class="modal">
+      <form id="profileForm" method="dialog" novalidate>
+        <h2 id="profileDialogTitle">Add server</h2>
+        <input id="profileId" type="hidden" />
+        <label class="field">
+          <span>Name</span>
+          <input id="profileNameInput" type="text" autocomplete="off" placeholder="My Mac" />
+        </label>
+        <div class="field-row">
+          <label class="field grow">
+            <span>Host</span>
+            <input id="profileHostInput" type="text" autocomplete="off" spellcheck="false" placeholder="mac.local or 192.168.1.10" required />
+          </label>
+          <label class="field port">
+            <span>Port</span>
+            <input id="profilePortInput" type="number" min="1" max="65535" inputmode="numeric" />
+          </label>
+        </div>
+        <label class="field">
+          <span>Password</span>
+          <input id="profilePasswordInput" type="password" autocomplete="new-password" />
+          <small class="muted">Stored server-side in the profile file and never sent to the browser.</small>
+        </label>
+        <label class="field">
+          <span>Expected server fingerprint (optional)</span>
+          <input id="profileFingerprintInput" type="text" autocomplete="off" spellcheck="false" placeholder="AA:BB:CC:…" />
+          <small class="muted">SHA-256 certificate fingerprint, colon-separated hex.</small>
+        </label>
+        <label class="check">
+          <input id="profileTrustedInput" type="checkbox" />
+          <span>Trust this server without asking</span>
+        </label>
+        <p id="profileTrustedHint" class="muted tiny"></p>
+        <div class="dialog-actions">
+          <button id="profileCancel" class="btn ghost" type="button">Cancel</button>
+          <button class="btn primary" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="displayDialog" class="display-dialog">
+      <div id="displayShell" class="display-shell">
+        <div class="display-toolbar">
+          <div class="display-title">
+            <span class="live-dot" aria-hidden="true"></span>
+            <strong id="displayTitle"></strong>
+            <span id="displaySubtitle" class="muted small"></span>
+          </div>
+          <div class="display-tools">
+            <span id="displayStatus" class="pill">Connecting…</span>
+            <span id="displayMouseMode" class="pill subtle">Pointer mode unknown</span>
+            <button id="displayCad" class="btn ghost small" type="button" title="Send Ctrl+Alt+Delete to the guest">Ctrl+Alt+Del</button>
+            <button id="displayRefresh" class="btn ghost small" type="button" title="Request a full redraw">Redraw</button>
+            <button id="displayReconnect" class="btn ghost small" type="button">Reconnect</button>
+            <button id="displayFullscreen" class="btn ghost small" type="button">Fullscreen</button>
+            <button id="displayClose" class="btn small" type="button">Close</button>
+          </div>
+        </div>
+        <div class="display-stage">
+          <canvas id="displayCanvas" tabindex="0" aria-label="Remote virtual machine display"></canvas>
+          <div id="displayOverlay" class="display-overlay" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <p id="displayOverlayText">Connecting…</p>
+            <p id="displayOverlayDetail" class="muted small"></p>
+          </div>
+        </div>
+        <div class="display-foot muted tiny">
+          Keyboard and pointer are forwarded to the guest. Click the display to capture the pointer in relative mode.
+          Clipboard, audio, USB and camera passthrough are not available in the browser client.
+        </div>
+      </div>
+    </dialog>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+  </body>
+</html>

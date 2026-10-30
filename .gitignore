@@ -1,0 +1,26 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Frontend dependencies (the compiled web/dist is committed on purpose: the
+# Rust binary embeds it with include_str!)
+/web/node_modules/
+
+# Local configuration, certificates and secrets
+/config.json
+/client.pem
+*.pem
+!tests/**/*.pem
+
+# Upstream pyutmremote reference checkout (its own git repository)
+/pyutmremote/
+
+# Release artifacts
+/dist/
+/release/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,15 @@
+{
+  "name": "utm-web-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vanilla TypeScript frontend for utm-web",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "typescript": "5.6"
+  }
+}
