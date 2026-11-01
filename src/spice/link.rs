@@ -71,7 +71,12 @@ impl SpiceReader {
             }
             let mut body = vec![0u8; size];
             self.inner.read_exact(&mut body).await?;
-            trace!("SPICE <- type {ty} ({} bytes)", body.len());
+            trace!(
+                "SPICE <- type {ty} ({} bytes) header={} body={}",
+                body.len(),
+                hex::encode(header),
+                hex::encode(&body[..body.len().min(32)])
+            );
             Ok(SpiceMessage { ty, body })
         } else {
             let mut header = [0u8; 18];
@@ -84,7 +89,12 @@ impl SpiceReader {
             }
             let mut body = vec![0u8; size];
             self.inner.read_exact(&mut body).await?;
-            trace!("SPICE <- type {ty} ({} bytes)", body.len());
+            trace!(
+                "SPICE <- type {ty} ({} bytes) header={} body={}",
+                body.len(),
+                hex::encode(header),
+                hex::encode(&body[..body.len().min(32)])
+            );
             Ok(SpiceMessage { ty, body })
         }
     }
@@ -173,6 +183,12 @@ pub async fn connect_channel(options: LinkOptions) -> Result<Channel> {
         link_body.extend_from_slice(&cap.to_le_bytes());
     }
 
+    trace!(
+        "SPICE link body channel {} connection_id {} body={}",
+        options.channel_type,
+        options.connection_id,
+        hex::encode(&link_body)
+    );
     let mut header = Vec::with_capacity(16);
     header.extend_from_slice(SPICE_MAGIC);
     header.extend_from_slice(&SPICE_VERSION_MAJOR.to_le_bytes());
@@ -216,6 +232,12 @@ pub async fn connect_channel(options: LinkOptions) -> Result<Channel> {
     let mut reply = vec![0u8; reply_size];
     tls.read_exact(&mut reply).await?;
 
+    trace!(
+        "SPICE link reply channel {} header={} first32={}",
+        options.channel_type,
+        hex::encode(reply_header),
+        hex::encode(&reply[..reply.len().min(32)])
+    );
     let link_error = u32::from_le_bytes([reply[0], reply[1], reply[2], reply[3]]);
     if link_error != 0 {
         return Err(Error::Spice(format!(
@@ -293,6 +315,11 @@ pub async fn connect_channel(options: LinkOptions) -> Result<Channel> {
     let mut auth_result = [0u8; 4];
     tls.read_exact(&mut auth_result).await?;
     let auth_result = u32::from_le_bytes(auth_result);
+    trace!(
+        "SPICE auth result channel {}: {}",
+        options.channel_type,
+        auth_result
+    );
     if auth_result != 0 {
         return Err(Error::Auth(format!(
             "SPICE ticket authentication failed (result {auth_result})"

@@ -46,6 +46,11 @@
   box-sizing: border-box;
 }
 
+/* Author `display` rules would otherwise override the `hidden` attribute. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -874,10 +879,6 @@ button {
   text-align: center;
   padding: 24px;
   z-index: 2;
-}
-
-.display-overlay[hidden] {
-  display: none;
 }
 
 .spinner {

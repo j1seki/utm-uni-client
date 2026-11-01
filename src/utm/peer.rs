@@ -250,9 +250,10 @@ impl Peer {
 
         let peer = Arc::clone(self);
         let body = body.to_vec();
+        let body_hex = hex::encode(&body[..body.len().min(256)]);
         tokio::spawn(async move {
             if let Err(error) = peer.handle_request(id, token, body).await {
-                warn!("failed to handle UTM message {id}: {error}");
+                warn!("failed to handle UTM message {id}: {error}; payload={body_hex}");
                 peer.reply_error(id, token, &error.to_string()).await;
             }
         });

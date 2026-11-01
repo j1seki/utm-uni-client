@@ -56,9 +56,9 @@ pub const MSG_MAIN_AGENT_DISCONNECTED: u16 = 108;
 pub const MSG_MAIN_NAME: u16 = 113;
 pub const MSG_MAIN_UUID: u16 = 114;
 
-pub const MSGC_MAIN_ATTACH_CHANNELS: u16 = 103;
-pub const MSGC_MAIN_MOUSE_MODE_REQUEST: u16 = 104;
-pub const MSGC_MAIN_AGENT_START: u16 = 105;
+pub const MSGC_MAIN_ATTACH_CHANNELS: u16 = 104;
+pub const MSGC_MAIN_MOUSE_MODE_REQUEST: u16 = 105;
+pub const MSGC_MAIN_AGENT_START: u16 = 106;
 
 // Display channel messages.
 pub const MSG_DISPLAY_MODE: u16 = 101;

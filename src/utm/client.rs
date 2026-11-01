@@ -103,7 +103,14 @@ impl UtmClient {
                 &messages::handshake(1, options.password.as_deref()),
             )
             .await?;
-        let reply = decode(&reply, schemas::SERVER_HANDSHAKE_REPLY)?;
+        let reply = decode(&reply, schemas::SERVER_HANDSHAKE_REPLY).map_err(|error| {
+            tracing::warn!(
+                "failed to decode server handshake reply ({} bytes): {error}; payload={}",
+                reply.len(),
+                hex::encode(&reply[..reply.len().min(256)])
+            );
+            error
+        })?;
         let version = reply.get("version").and_then(Value::as_i64).unwrap_or(0);
         if version != 1 {
             peer.close();
@@ -167,7 +174,14 @@ impl UtmClient {
 
     async fn request(&self, id: u8, body: &Value, schema: crate::codable::Type) -> Result<Value> {
         let reply = self.peer.request(id, body).await?;
-        decode(&reply, schema)
+        decode(&reply, schema).map_err(|error| {
+            tracing::warn!(
+                "failed to decode UTM message {id} reply ({} bytes): {error}; payload={}",
+                reply.len(),
+                hex::encode(&reply[..reply.len().min(256)])
+            );
+            error
+        })
     }
 
     async fn request_empty(&self, id: u8, body: &Value) -> Result<()> {

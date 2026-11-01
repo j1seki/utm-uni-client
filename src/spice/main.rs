@@ -55,6 +55,30 @@ pub async fn connect_main(options: LinkOptions) -> Result<MainChannel> {
                         .await?;
                 }
                 channel.writer.send(MSGC_MAIN_ATTACH_CHANNELS, &[]).await?;
+                // The server registers the client for additional channels and
+                // announces the available channels in response to the attach
+                // request.  Wait for that list before the caller opens the
+                // display/inputs channels.
+                let wait = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let message = channel.reader.recv().await?;
+                        if ack.handle(&message, &channel.writer).await? {
+                            continue;
+                        }
+                        if message.ty == MSG_MAIN_CHANNELS_LIST {
+                            debug!(
+                                "SPICE channels list received ({} bytes)",
+                                message.body.len()
+                            );
+                            return Ok(());
+                        }
+                    }
+                })
+                .await;
+                match wait {
+                    Ok(result) => result?,
+                    Err(_) => debug!("timed out waiting for SPICE channels list"),
+                }
                 break info;
             }
             MSG_MAIN_NAME | MSG_MAIN_UUID | MSG_MAIN_CHANNELS_LIST => {}
@@ -166,7 +190,12 @@ impl AckState {
                 Ok(true)
             }
             MSG_PING => {
-                writer.send(MSGC_PONG, &message.body).await?;
+                // `SpiceMsgPing` is `id: u32` + `timestamp: u64`.  The ping body
+                // may carry extra data (the server's 250 KiB net test), but the
+                // pong struct has no payload, and the server's demarshaller
+                // rejects a pong whose size does not match exactly.
+                let len = message.body.len().min(12);
+                writer.send(MSGC_PONG, &message.body[..len]).await?;
                 Ok(true)
             }
             MSG_DISCONNECTING => Err(Error::Closed),

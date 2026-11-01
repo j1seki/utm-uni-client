@@ -118,6 +118,12 @@ pub async fn create_display(request: CreateDisplay) -> Result<Arc<DisplaySession
     let server_info = client
         .start_virtual_machine(&vm_id, StartOptions::NONE)
         .await?;
+    debug!(
+        "SPICE endpoint internal={} external={} host={:?} server_host={server_host}",
+        server_info.spice_port_internal,
+        server_info.spice_port_external,
+        server_info.spice_host_external
+    );
     let (host, port) = server_info
         .endpoint(&server_host)
         .ok_or_else(|| Error::Spice("UTM server did not advertise a SPICE endpoint".into()))?;
@@ -161,7 +167,11 @@ pub async fn create_display(request: CreateDisplay) -> Result<Arc<DisplaySession
         channel_caps: display_channel_caps(),
         timeout: Duration::from_secs(15),
     })
-    .await?;
+    .await
+    .map_err(|error| {
+        warn!("SPICE display channel connection failed: {error}");
+        error
+    })?;
     initialize_display(&display.writer, true).await?;
 
     let renderer = DisplayRenderer::new();

@@ -835,7 +835,13 @@ async fn display_ws(
     State(state): State<Arc<AppState>>,
     Path((profile_id, vm_id)): Path<(String, String)>,
 ) -> std::result::Result<Response, ApiError> {
-    let session = state.ensure_display(&profile_id, &vm_id).await?;
+    let session = match state.ensure_display(&profile_id, &vm_id).await {
+        Ok(session) => session,
+        Err(error) => {
+            warn!("display session for {profile_id}/{vm_id} failed: {error:?}");
+            return Err(error);
+        }
+    };
     let events = session.subscribe();
     Ok(ws.on_upgrade(move |socket| async move {
         run_display_ws(socket, session, events).await;

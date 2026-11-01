@@ -68,10 +68,14 @@ pub fn client_handshake_reply(version: i64, capabilities: i64) -> Value {
     ])
 }
 
-/// `OptionSet` values are Swift structs, so they are encoded as a keyed
-/// container with a single `rawValue` field rather than a bare integer.
+/// `OptionSet` values are encoded as their bare raw integer on the wire.
+///
+/// Although `UTMCapabilities` and `UTMVirtualMachineStartOptions` are Swift
+/// structs, `Cod` encodes them through their `RawValue` (matching the
+/// `IntFlag` model used by pyutmremote), not as a `{ "rawValue": ... }`
+/// keyed container.
 pub fn option_set(raw_value: i64) -> Value {
-    Value::dict([("rawValue", Value::Int(raw_value))])
+    Value::Int(raw_value)
 }
 
 pub fn list_virtual_machines() -> Value {
@@ -204,8 +208,8 @@ pub mod schemas {
         ("spicePassword", Type::Str),
     ]);
 
-    /// Swift `OptionSet` structs encode as `{ "rawValue": UInt }`.
-    pub static OPTION_SET: Type = Type::Struct(&[("rawValue", Type::Int)]);
+    /// Swift `OptionSet` values encode as their bare raw integer.
+    pub static OPTION_SET: Type = Type::Int;
 
     pub static VM_INFORMATION: Type = Type::Struct(&[
         ("id", Type::Str),
@@ -274,31 +278,15 @@ mod tests {
     use crate::utm::types::VmInfo;
 
     #[test]
-    fn client_handshake_reply_encodes_capabilities_as_option_set() {
+    fn client_handshake_reply_encodes_capabilities_as_raw_integer() {
         let reply = client_handshake_reply(1, 5);
-        assert_eq!(
-            reply.get("capabilities").and_then(|v| v.get("rawValue")),
-            Some(&Value::Int(5))
-        );
-        assert_eq!(
-            reply.get("capabilities").and_then(Value::as_i64),
-            None,
-            "capabilities must not be a bare integer"
-        );
+        assert_eq!(reply.get("capabilities"), Some(&Value::Int(5)));
     }
 
     #[test]
-    fn start_virtual_machine_encodes_options_as_option_set() {
+    fn start_virtual_machine_encodes_options_as_raw_integer() {
         let request = start_virtual_machine("vm-1", 4);
-        assert_eq!(
-            request.get("options").and_then(|v| v.get("rawValue")),
-            Some(&Value::Int(4))
-        );
-        assert_eq!(
-            request.get("options").and_then(Value::as_i64),
-            None,
-            "options must not be a bare integer"
-        );
+        assert_eq!(request.get("options"), Some(&Value::Int(4)));
     }
 
     #[test]
@@ -306,7 +294,7 @@ mod tests {
         let reply = Value::dict([
             ("version", Value::Int(1)),
             ("isAuthenticated", Value::Bool(true)),
-            ("capabilities", option_set(13)),
+            ("capabilities", Value::Int(13)),
             ("model", Value::Str("Mac14,2".into())),
         ]);
         let decoded = decode(&encode(&reply).unwrap(), schemas::SERVER_HANDSHAKE_REPLY).unwrap();
@@ -316,10 +304,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            decoded
-                .get("capabilities")
-                .and_then(|v| v.get("rawValue"))
-                .and_then(Value::as_i64),
+            decoded.get("capabilities").and_then(Value::as_i64),
             Some(13)
         );
     }
@@ -360,6 +345,44 @@ mod tests {
             vm.mounted_drives.get("disk.img").map(String::as_str),
             Some("/dev/sda")
         );
+    }
+
+    #[test]
+    fn decodes_multiple_vms_with_empty_drives() {
+        let make = |id: &str, name: &str, state: i64| {
+            Value::dict([
+                ("id", Value::Str(id.into())),
+                ("name", Value::Str(name.into())),
+                ("path", Value::Str(format!("/Users/me/VMs/{name}.utm"))),
+                ("isShortcut", Value::Bool(false)),
+                ("isSuspended", Value::Bool(false)),
+                ("isTakeoverAllowed", Value::Bool(true)),
+                ("backend", Value::Str("QEMU".into())),
+                ("state", Value::Int(state)),
+                ("mountedDrives", Value::Dict(Default::default())),
+            ])
+        };
+        let reply = Value::dict([(
+            "informations",
+            Value::Array(vec![
+                make("A1B2C3D4-0000-0000-0000-000000000000", "Win", 2),
+                make("B1B2C3D4-0000-0000-0000-000000000000", "Ubuntu Server", 0),
+                make("C1B2C3D4-0000-0000-0000-000000000000", "macOS", 4),
+            ]),
+        )]);
+        let decoded = decode(&encode(&reply).unwrap(), schemas::GET_VM_INFO_REPLY).unwrap();
+        let vms: Vec<VmInfo> = decoded
+            .get("informations")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(VmInfo::from_value)
+            .collect();
+        assert_eq!(vms.len(), 3);
+        assert_eq!(vms[0].state, crate::utm::types::VmState::Started);
+        assert_eq!(vms[1].state, crate::utm::types::VmState::Stopped);
+        assert_eq!(vms[2].state, crate::utm::types::VmState::Paused);
+        assert!(vms.iter().all(|vm| vm.mounted_drives.is_empty()));
     }
 
     #[test]
